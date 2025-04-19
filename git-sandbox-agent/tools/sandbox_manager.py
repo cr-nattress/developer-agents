@@ -7,7 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Root directory for all sandboxes
-ROOT_SANDBOX_DIR = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'application-sandbox')))
+ROOT_SANDBOX_DIR = Path(r'C:\Users\NUC01\github\sandbox')
 
 def initialize_sandbox_root() -> None:
     """

@@ -1,16 +1,20 @@
 import logging
 import os
 import sys
-import time
+from datetime import datetime
 from pathlib import Path
-import datetime
-import uuid
 
 # Add the current directory to the path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import the config loader
-from context.config_loader import load_env_config
+# Import workflow steps
+from workflow_steps import utils
+from workflow_steps import step1_create_sandbox
+from workflow_steps import step2_clone_repository
+from workflow_steps import step3_commit_changes
+from workflow_steps import step4_wait
+from workflow_steps import step5_cleanup
+from workflow_steps import step6_code_changes
 
 # Configure logging
 logging.basicConfig(
@@ -24,182 +28,286 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def main():
-    print("\n===== GIT ORCHESTRATOR FULL WORKFLOW EXAMPLE =====\n")
+def setup_workflow():
+    """
+    Step 1: Setup workflow configuration and metadata.
+    
+    Returns:
+        tuple: (repo_url, git_config, metadata) containing the repository URL, Git configuration, and workflow metadata
+    """
+    print("Step 1: Setting up workflow...")
     
     # Load environment variables
-    env_vars = load_env_config()
+    env_config = utils.load_env_config()
     
-    # Get the repository URL from environment or use default
-    repo_url = env_vars.get('DEFAULT_REPO_URL', "https://github.com/cr-nattress/ai-devops-lab.git")
+    # Get repository URL from environment or use default
+    repo_url = env_config.get('DEFAULT_REPO_URL', 'https://github.com/cr-nattress/ai-devops-lab.git')
     print(f"Using repository: {repo_url}")
     
-    # Get Git configuration from environment
+    # Setup Git configuration
     git_config = {
-        "user.name": env_vars.get('GIT_AUTHOR_NAME', "GANON"),
-        "user.email": env_vars.get('GIT_AUTHOR_EMAIL', "your.email@example.com")
+        'user.name': env_config.get('GIT_AUTHOR_NAME', 'GANON'),
+        'user.email': env_config.get('GIT_AUTHOR_EMAIL', 'your.email@example.com')
     }
     print(f"Using Git config: {git_config}")
     
-    # Generate a unique ID for this workflow run
-    unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    workflow_id = f"{timestamp}_{unique_id}"
+    # Generate workflow ID
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Generate a random ID (8 hexadecimal characters)
+    import random
+    random_id = ''.join(random.choice('0123456789abcdef') for _ in range(8))
+    workflow_id = f"{timestamp}_{random_id}"
     print(f"Workflow ID: {workflow_id}")
     
-    # Create branch name and file content
-    branch_name = f"feature/orchestrator-workflow-{unique_id}"
-    file_name = f"orchestrator_test_{unique_id}.txt"
-    file_content = f"This file was created by the Git Orchestrator Agent.\nWorkflow ID: {workflow_id}\nTimestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    commit_message = f"Add test file via orchestrator workflow {unique_id}"
+    # Create metadata for the workflow
+    metadata = {
+        'workflow_id': workflow_id,
+        'timestamp': timestamp
+    }
     
-    # Step 1: Create a sandbox environment using the sandbox_manager
+    return repo_url, git_config, metadata
+
+def create_sandbox_environment():
+    """
+    Step 1: Create a sandbox environment.
+    
+    Returns:
+        str or None: Path to the created sandbox, or None if creation failed
+    """
     print("\nStep 1: Creating sandbox environment...")
-    try:
-        # Add the git-sandbox-agent directory to the Python path
-        sandbox_agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'git-sandbox-agent'))
-        if sandbox_agent_dir not in sys.path:
-            sys.path.insert(0, sandbox_agent_dir)
-            print(f"Added {sandbox_agent_dir} to Python path")
-        
-        # Import the sandbox_manager
-        from tools import sandbox_manager
-        
-        # Create a sandbox environment directly
-        sandbox_path = sandbox_manager.create_sandbox()
-        print(f"Sandbox created at: {sandbox_path}")
-        
-    except Exception as e:
-        print(f"Error creating sandbox: {str(e)}")
-        return
+    sandbox_path = step1_create_sandbox.create_sandbox()
+    if not sandbox_path:
+        print("Failed to create sandbox. Exiting workflow.")
+        return None
+    print(f"Sandbox created at: {sandbox_path}")
+    return sandbox_path
+
+def clone_repository(sandbox_path, repo_url, git_config):
+    """
+    Step 2: Clone the repository into the sandbox.
     
-    # Step 2: Import and instantiate the GitCloneAgent
+    Args:
+        sandbox_path (str): Path to the sandbox environment
+        repo_url (str): URL of the repository to clone
+        git_config (dict): Git configuration
+        
+    Returns:
+        tuple: (success, repo_path) where success is a boolean and repo_path is the path to the cloned repository
+    """
     print("\nStep 2: Cloning repository...")
-    try:
-        # Add the git-clone-agent directory to the Python path
-        clone_agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'git-clone-agent'))
-        if clone_agent_dir not in sys.path:
-            sys.path.insert(0, clone_agent_dir)
-            print(f"Added {clone_agent_dir} to Python path")
-            
-        # Temporarily remove other agent directories from path to avoid conflicts
-        path_copy = sys.path.copy()
-        sys.path = [p for p in sys.path if 'git-commit-agent' not in p and 'git-sandbox-agent' not in p] + [clone_agent_dir]
+    clone_success, repo_path = step2_clone_repository.clone_repository(sandbox_path, repo_url, git_config)
+    if not clone_success:
+        print("Failed to clone repository. Cleaning up and exiting workflow.")
+        step2_clone_repository.cleanup_on_failure(sandbox_path)
+        return False, None
+    print(f"Repository cloned successfully to: {repo_path}")
+    return True, repo_path
+
+def commit_changes(repo_path, metadata):
+    """
+    Create a branch, add or modify files, and commit changes.
+    
+    Args:
+        repo_path (str): Path to the cloned repository
+        metadata (dict): Dictionary containing metadata for the commit
         
-        # Import the GitCloneAgent
-        from git_clone_agent.core.agent import GitCloneAgent
+    Returns:
+        Tuple[bool, Optional[str]]: (success, commit_hash) where success is True if all operations were successful,
+                                   and commit_hash is the hash of the commit
+    """
+    # Extract metadata with defaults
+    branch_name = metadata.get('branch_name', f"feature/auto-{metadata.get('workflow_id', 'unknown')}")
+    commit_message = metadata.get('commit_message', "Automated commit from Git Orchestrator")
+    
+    # For backward compatibility, check if we need to create a sample file
+    if 'file_name' in metadata and 'file_content' in metadata:
+        file_name = metadata['file_name']
+        file_content = metadata['file_content']
+        print(f"\nCommitting changes to {file_name} on branch {branch_name}...")
         
-        # Clone the repository using the GitCloneAgent
-        clone_agent = GitCloneAgent(working_dir=sandbox_path)
-        success, repo_path = clone_agent.clone_repository(
-            repo_url=repo_url,
-            git_config=git_config
+        success, commit_hash = step3_commit_changes.commit_changes(
+            repo_path, branch_name, file_name, file_content, commit_message
         )
+    else:
+        # For the new workflow, we're committing existing changes
+        print(f"\nCommitting existing changes on branch {branch_name}...")
         
-        # Restore the original path
-        sys.path = path_copy
+        # TODO: Update step3_commit_changes.py to handle committing existing changes
+        # For now, we'll create a placeholder file to demonstrate the workflow
+        file_name = "commit_info.txt"
+        file_content = f"This commit contains code improvements made at {metadata.get('timestamp', 'unknown time')}\nCommit message: {commit_message}"
         
-        if success:
-            print(f"Repository cloned successfully to: {repo_path}")
-            
-            # List the contents of the cloned repository
-            print("\nContents of the cloned repository:")
-            for item in os.listdir(repo_path):
-                print(f"  - {item}")
-        else:
-            print(f"Failed to clone repository: {clone_agent.error_message}")
-            raise RuntimeError("Failed to clone repository")
-            
-    except Exception as e:
-        print(f"Error cloning repository: {str(e)}")
-        # Clean up sandbox if clone failed
-        try:
-            sandbox_manager.cleanup_sandbox(sandbox_path)
-        except:
-            pass
-        return
+        success, commit_hash = step3_commit_changes.commit_changes(
+            repo_path, branch_name, file_name, file_content, commit_message
+        )
     
-    # Step 3: Import and instantiate the GitCommitAgent
-    print("\nStep 3: Creating branch, adding file, and committing changes...")
+    if success:
+        print(f"Successfully committed changes with hash: {commit_hash}")
+        return True, commit_hash
+    else:
+        print("Failed to commit changes. Continuing with workflow.")
+        return False, None
+
+def wait_before_cleanup(seconds=15):
+    """
+    Step 4: Wait for a specified number of seconds before cleanup.
+    
+    Args:
+        seconds (int): Number of seconds to wait
+    """
+    print(f"\nStep 4: Waiting {seconds} seconds before cleanup...")
+    step4_wait.wait(seconds)
+
+def apply_code_changes(repo_path, code_prompt):
+    """
+    Step 6: Apply code changes using the CoderAgent.
+    
+    Args:
+        repo_path (str): Path to the cloned repository
+        code_prompt (str): Natural language prompt describing the code changes to make
+        
+    Returns:
+        bool: True if code changes were applied successfully, False otherwise
+    """
+    print("\nStep 6: Applying code changes...")
+    print(f"Repository path: {repo_path}")
+    print(f"Code prompt: {code_prompt}")
+    
+    # Check if the repository path exists
+    if not os.path.exists(repo_path):
+        print(f"Error: Repository path does not exist: {repo_path}")
+        return False
+    
+    # Check if the repository contains Python files
+    python_files = []
+    for root, _, files in os.walk(repo_path):
+        for file in files:
+            if file.endswith('.py'):
+                python_files.append(os.path.join(root, file))
+    
+    print(f"Found {len(python_files)} Python files in the repository")
+    if python_files:
+        print("Example Python files:")
+        for file in python_files[:3]:  # Show up to 3 examples
+            print(f"  - {os.path.relpath(file, repo_path)}")
+    
+    # Apply code changes
     try:
-        # Add the git-commit-agent directory to the Python path
-        commit_agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'git-commit-agent'))
-        if commit_agent_dir not in sys.path:
-            sys.path.insert(0, commit_agent_dir)
-            print(f"Added {commit_agent_dir} to Python path")
+        print("\nApplying code changes with CoderAgent...")
+        success, results = step6_code_changes.apply_code_changes(repo_path, code_prompt)
+        
+        if success and results:
+            print(f"\nSuccess! Applied code changes to {results.get('files_changed', 0)} files")
             
-        # Temporarily remove other agent directories from path to avoid conflicts
-        sys.path = [p for p in sys.path if 'git-clone-agent' not in p and 'git-sandbox-agent' not in p] + [commit_agent_dir]
+            # Show detailed results
+            if "results" in results:
+                print("\nModified files:")
+                for file_path, success, message in results["results"]:
+                    status = "✓" if success else "✗"
+                    rel_path = os.path.relpath(file_path, repo_path)
+                    print(f"  {status} {rel_path}: {message}")
             
-        # Import the GitCommitAgent
-        from git_commit_agent.core.agent import GitCommitAgent
-        
-        # Create a new instance of the GitCommitAgent
-        commit_agent = GitCommitAgent(repo_path)
-        
-        # Restore the original path
-        sys.path = path_copy
-        
-        # Create a new branch
-        print(f"\nCreating branch: {branch_name}")
-        if not commit_agent.create_branch(branch_name, "main"):
-            print(f"Failed to create branch: {commit_agent.error_message}")
-            raise RuntimeError("Failed to create branch")
-        print(f"Branch '{branch_name}' created successfully")
-        
-        # Create a new file
-        print(f"\nCreating file: {file_name}")
-        file_path = os.path.join(repo_path, file_name)
-        with open(file_path, 'w') as f:
-            f.write(file_content)
-        print(f"File created successfully")
-        
-        # Stage the changes
-        print("\nStaging changes...")
-        if not commit_agent.stage_all():
-            print(f"Failed to stage changes: {commit_agent.error_message}")
-            raise RuntimeError("Failed to stage changes")
-        print("Changes staged successfully")
-        
-        # Commit the changes
-        print("\nCommitting changes...")
-        if not commit_agent.commit(commit_message):
-            print(f"Failed to commit changes: {commit_agent.error_message}")
-            raise RuntimeError("Failed to commit changes")
-        print(f"Changes committed successfully with message: '{commit_message}'")
-        print(f"Commit hash: {commit_agent.commit_hash}")
-        
-        # Push the changes
-        print("\nPushing changes...")
-        if commit_agent.push():
-            print("Changes pushed successfully")
+            # Show summary if available
+            if "summary" in results:
+                print("\nSummary of changes:")
+                print(results["summary"])
+                
+            return True
         else:
-            print(f"Failed to push changes: {commit_agent.error_message}")
-            print("\nNote: This is expected without proper authentication.")
-            print("To push changes in a real scenario, you would need:")
-            print("1. Proper GitHub authentication")
-            print("2. Write access to the repository")
-            print("3. Possibly a personal access token or SSH key")
-        
+            error_msg = "Unknown error"
+            if results:
+                error_msg = results.get('error', 'Unknown error')
+            print(f"Failed to apply code changes: {error_msg}")
+            return False
     except Exception as e:
-        print(f"Error in commit operations: {str(e)}")
+        print(f"Exception while applying code changes: {str(e)}")
+        return False
+
+def cleanup_sandbox(sandbox_path):
+    """
+    Step 5: Clean up the sandbox environment.
     
-    # Step 4: Wait for 15 seconds
-    print("\nStep 4: Waiting for 15 seconds...")
-    for i in range(15, 0, -1):
-        print(f"Cleaning up in {i} seconds...", end="\r")
-        time.sleep(1)
-    print("\nWait complete.")
-    
-    # Step 5: Clean up the sandbox
+    Args:
+        sandbox_path (str): Path to the sandbox environment
+        
+    Returns:
+        bool: True if cleanup was successful, False otherwise
+    """
     print("\nStep 5: Cleaning up sandbox...")
-    try:
-        # Clean up the sandbox using the sandbox_manager
-        sandbox_manager.cleanup_sandbox(sandbox_path)
+    cleanup_success = step5_cleanup.cleanup_sandbox(sandbox_path)
+    if cleanup_success:
         print("Sandbox cleaned up successfully.")
-    except Exception as e:
-        print(f"Error cleaning up sandbox: {str(e)}")
+        return True
+    else:
+        print("Workflow completed with cleanup errors.")
         print("Sandbox may need manual cleanup.")
+        return False
+
+def main():
+    """
+    Main function to run the full Git workflow example.
+    """
+    print("===== GIT ORCHESTRATOR FULL WORKFLOW EXAMPLE =====")
+    
+    # Step 1: Setup workflow
+    repo_url, git_config, metadata = setup_workflow()
+    
+    sandbox_path = None
+    try:
+        # Step 2: Create sandbox environment
+        sandbox_path = create_sandbox_environment()
+        if not sandbox_path:
+            print("Failed to create sandbox environment. Exiting.")
+            return
+        
+        # Step 3: Clone repository
+        clone_success, repo_path = clone_repository(sandbox_path, repo_url, git_config)
+        if not clone_success:
+            print("Failed to clone repository. Cleaning up sandbox.")
+            return
+        
+        # Step 4: Create a new branch using the git branch agent
+        branch_name = f"feature/auto-improvements-{metadata['workflow_id']}"
+        print(f"\nStep 4: Creating new branch: {branch_name}...")
+        # TODO: Implement branch creation using git branch agent
+        # For now, we'll use the commit_changes function which creates a branch
+        branch_success = True  # Placeholder until git branch agent is implemented
+        if not branch_success:
+            print(f"Failed to create branch {branch_name}. Continuing with workflow.")
+        
+        # Step 5: Apply code changes using the coder agent
+        code_prompt = "Add docstrings to all functions that don't have them and add type hints to function parameters"
+        code_change_success = apply_code_changes(repo_path, code_prompt)
+        if not code_change_success:
+            print("Failed to apply code changes. Continuing with workflow.")
+        
+        # Step 6: Commit the changes and push to remote
+        print("\nStep 6: Committing and pushing changes...")
+        commit_message = f"Auto-improvements: Added docstrings and type hints"
+        commit_success, commit_hash = commit_changes(repo_path, {
+            'branch_name': branch_name,
+            'commit_message': commit_message,
+            'author_name': git_config.get('user.name', 'AI Agent'),
+            'author_email': git_config.get('user.email', 'ai.agent@example.com')
+        })
+        
+        if commit_success:
+            print(f"Successfully committed changes with hash: {commit_hash}")
+            # TODO: Implement push to remote
+            print("Push to remote not yet implemented")
+        else:
+            print("Failed to commit changes. Continuing with workflow.")
+        
+        # Wait a moment before cleanup
+        wait_before_cleanup(5)
+        
+    except Exception as e:
+        print(f"An error occurred during workflow execution: {str(e)}")
+    finally:
+        # Step 7: Always clean up sandbox if it was created
+        if sandbox_path:
+            print("\nCleaning up sandbox...")
+            cleanup_sandbox(sandbox_path)
     
     print("\n===== GIT ORCHESTRATOR FULL WORKFLOW EXAMPLE COMPLETE =====\n")
 
