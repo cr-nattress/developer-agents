@@ -1,0 +1,47 @@
+[
+    {
+      "name": "scaffold_structure",
+      "description": "Scaffold initial folder structure for the Git agent app.",
+      "prompt": "Create the initial folder structure for a Python application that automates Git operations through multiple agents. The folders should be:\n\n- `tools/` for low-level Git, GitHub, and sandbox functions\n- `core/` for agent logic and orchestration\n- `prompts/` for any template messages used by LLMs\n- `context/` for shared state and configuration\n- `output/` for result handling and logs\n- `tests/` for unit tests\n\nUse empty `__init__.py` files in each folder to make them Python packages."
+    },
+    {
+      "name": "create_git_ops",
+      "description": "Create the git command wrapper module.",
+      "prompt": "Create a Python module called `git_ops.py` in the `tools` directory that wraps basic Git commands using `subprocess.run`. The following functions should be included:\n\n- `clone_repo(repo_url: str, target_dir: Path)`\n- `create_branch(branch_name: str, cwd: Path)`\n- `commit_all(message: str, cwd: Path)`\n- `push_branch(branch_name: str, cwd: Path)`\n\nAll functions should raise `RuntimeError` if the git command fails, and return the command output otherwise."
+    },
+    {
+      "name": "create_github_api",
+      "description": "Create the GitHub API wrapper using PyGithub.",
+      "prompt": "Create a Python module called `github_api.py` that uses the `PyGithub` library to create a pull request.\n\nAdd a function:\n```python\ndef create_pull_request(token: str, repo_name: str, base: str, head: str, title: str, body: str) -> str\n```\nThis function should create a pull request on GitHub and return the PR URL. Assume `token` is a valid GitHub access token."
+    },
+    {
+      "name": "create_sandbox_manager",
+      "description": "Manage temporary folders using tempfile and shutil.",
+      "prompt": "Create a Python module called `sandbox_manager.py` that provides utility functions for creating and cleaning up temporary directories.\n\nInclude:\n- `create_sandbox() -> Path`\n- `cleanup_sandbox(path: Path)`\n\nUse Python\u2019s `tempfile` and `shutil` libraries."
+    },
+    {
+      "name": "create_agent_runner",
+      "description": "Create an agent orchestrator to run all actions together.",
+      "prompt": "Create a file `core/agent.py` that defines a function `run_git_workflow()` which:\n\n1. Creates a sandbox\n2. Clones a repo using `git_ops.clone_repo`\n3. Creates a branch\n4. Writes a test file to the repo folder\n5. Commits and pushes changes\n6. Creates a pull request via `github_api.create_pull_request`\n7. Cleans up the sandbox\n\nMake sure to call cleanup in a try/finally block."
+    },
+    {
+      "name": "create_tool_tests",
+      "description": "Generate tests for each tool module.",
+      "prompt": "Write unit tests for the following files using `unittest.mock`:\n\n- `tools/git_ops.py`: mock `subprocess.run`\n- `tools/github_api.py`: mock GitHub API calls\n- `tools/sandbox_manager.py`: test sandbox creation and deletion\n\nPlace tests in the `tests/` folder and use a `test_*.py` naming convention."
+    },
+    {
+      "name": "create_env_loader",
+      "description": "Create .env loader using python-dotenv.",
+      "prompt": "Create a `context/config_loader.py` file that uses `python-dotenv` to load values from a `.env` file into environment variables. Include a function `load_env_config()` that loads the file and prints a warning if required vars are missing: `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`."
+    },
+    {
+      "name": "create_project_readme",
+      "description": "Create a project README for usage and setup.",
+      "prompt": "Create a README.md file for the root of this Git automation project. Include:\n\n- What the project does\n- Setup instructions\n- How to run the agent end-to-end\n- How to configure environment variables\n- How to add new tools or extend agents\n\nUse markdown headers and clean formatting."
+    },
+    {
+      "name": "setup_logging",
+      "description": "Set up application-wide logging to a log directory.",
+      "prompt": "Create a logging utility module called `logger.py` inside the `output/` directory.\n\n- Configure Python's built-in `logging` module.\n- Logs should be written to a file `app.log` inside a `log/` directory at the application root.\n- Create the log directory if it doesn't exist.\n- Log format should include timestamp, log level, and message.\n- Include a function `get_logger(name: str)` that returns a preconfigured logger instance.\n"
+    }
+  ]

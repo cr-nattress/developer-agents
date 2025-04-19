@@ -1,0 +1,1 @@
+Create a `context/config_loader.py` file that uses `python-dotenv` to load values from a `.env` file into environment variables. Include a function `load_env_config()` that loads the file and prints a warning if required vars are missing: `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`.

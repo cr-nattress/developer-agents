@@ -1,0 +1,5 @@
+# Git Orchestrator Agent Dependencies
+pathlib>=1.0.0
+logging>=0.5.1.2
+importlib-metadata>=1.4.0
+python-dotenv>=0.19.0
